@@ -1,6 +1,8 @@
 package server
 
 import (
+	"encoding/json"
+	"fmt"
 	"github.com/BitTraceProject/BitTrace-Types/pkg/protocol"
 	"log"
 	"net/rpc"
@@ -32,11 +34,11 @@ func NewResolverServer(conf *config.ResolverConfig, resolverTag, exporterTag str
 		conf:        conf,
 		stopCh:      make(chan bool, 1),
 	}
-	//err := s.initClient()
-	//if err != nil {
-	//	panic(fmt.Errorf("[NewResolverServer]err:%v", err))
-	//}
-	//go s.Start()
+	err := s.initClient()
+	if err != nil {
+		panic(fmt.Errorf("[NewResolverServer]err:%v", err))
+	}
+	go s.Start()
 	return s
 }
 
@@ -65,8 +67,10 @@ func (s *ResolverServer) Start() {
 	for {
 		select {
 		case <-timer.C:
+			log.Println("C")
 			// 轮询 mq
 			msg, hasNext, ok := s.consume()
+			log.Println(hasNext)
 			if ok {
 				// 处理并存储
 				s.resolve(msg)
@@ -145,5 +149,11 @@ func (s *ResolverServer) resolve(message protocol.MqMessage) {
 	if s.hasShutdown {
 		return
 	}
-	log.Printf("resolve:%s,message:%+v", s.resolverTag, message)
+	tag, data := message.Tag, message.Msg
+	var dataPackage protocol.ReceiverDataPackage
+	err := json.Unmarshal(data, &dataPackage)
+	if err != nil {
+		log.Printf("[resolve]err:%v", err)
+	}
+	log.Printf("resolve:%s,tag:%s,message:%+v", s.resolverTag, tag, dataPackage)
 }
