@@ -1,9 +1,9 @@
 package server
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/BitTraceProject/BitTrace-Types/pkg/protocol"
 	"log"
 	"net/rpc"
 	"net/rpc/jsonrpc"
@@ -11,21 +11,30 @@ import (
 
 	"github.com/BitTraceProject/BitTrace-Types/pkg/config"
 	"github.com/BitTraceProject/BitTrace-Types/pkg/constants"
+	"github.com/BitTraceProject/BitTrace-Types/pkg/protocol"
 )
 
-type ResolverServer struct {
-	resolverTag string // resolver tag
-	exporterTag string // 对应的 exporter tag，从 mq 消费消息
-	conf        *config.ResolverConfig
+type (
+	ResolverServer struct {
+		resolverTag string // resolver tag
+		exporterTag string // 对应的 exporter tag，从 mq 消费消息
+		conf        *config.ResolverConfig
 
-	mqClient              *rpc.Client
-	collectorWriterClient *rpc.Client
+		mqClient              *rpc.Client
+		collectorWriterClient *rpc.Client
 
-	hasShutdown  bool
-	lazyShutdown bool
+		hasShutdown  bool
+		lazyShutdown bool
 
-	stopCh chan bool
-}
+		stopCh chan bool
+
+		resolver *Resolver
+	}
+
+	// Resolver 具体地数据处理能力
+	Resolver struct {
+	}
+)
 
 func NewResolverServer(conf *config.ResolverConfig, resolverTag, exporterTag string) *ResolverServer {
 	s := &ResolverServer{
@@ -33,6 +42,7 @@ func NewResolverServer(conf *config.ResolverConfig, resolverTag, exporterTag str
 		exporterTag: exporterTag,
 		conf:        conf,
 		stopCh:      make(chan bool, 1),
+		resolver:    &Resolver{},
 	}
 	err := s.initClient()
 	if err != nil {
@@ -67,10 +77,8 @@ func (s *ResolverServer) Start() {
 	for {
 		select {
 		case <-timer.C:
-			log.Println("C")
 			// 轮询 mq
 			msg, hasNext, ok := s.consume()
-			log.Println(hasNext)
 			if ok {
 				// 处理并存储
 				s.resolve(msg)
@@ -155,5 +163,21 @@ func (s *ResolverServer) resolve(message protocol.MqMessage) {
 	if err != nil {
 		log.Printf("[resolve]err:%v", err)
 	}
+
 	log.Printf("resolve:%s,tag:%s,message:%+v", s.resolverTag, tag, dataPackage)
+
+	// TODO 确定写入 collector 的方式
+	//s.resolver.pipeline(db)
+}
+
+// pipeline 按照规定流程，
+// 以 data package 为单位进行重排序，
+// 以 snapshot 为单位进行处理，
+// 处理结果写入 collector
+// TODO 流程图
+func (r *Resolver) pipeline(db *sql.DB) {
+	// 1 data package 内部重排序（基于 snapshot timestamp）
+	// 2 data package 间重排序（权衡：假定在 data package 规模为 N 时，snapshot 发生乱序的时间线不会超出两个 data package）
+	// 3 依次处理 snapshot
+	// 4 写入 collector
 }
