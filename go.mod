@@ -2,7 +2,7 @@ module github.com/BitTraceProject/BitTrace-Resolver
 
 go 1.18
 
-require github.com/BitTraceProject/BitTrace-Types v0.0.0-20221217091707-068ffad39cf1
+require github.com/BitTraceProject/BitTrace-Types v0.0.0-20221217121029-a62ae0e46a99
 
 require (
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
