@@ -3,12 +3,12 @@ package server
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/rpc"
 	"net/rpc/jsonrpc"
 	"time"
 
+	"github.com/BitTraceProject/BitTrace-Types/pkg/common"
 	"github.com/BitTraceProject/BitTrace-Types/pkg/config"
 	"github.com/BitTraceProject/BitTrace-Types/pkg/constants"
 	"github.com/BitTraceProject/BitTrace-Types/pkg/protocol"
@@ -44,30 +44,8 @@ func NewResolverServer(conf *config.ResolverConfig, resolverTag, exporterTag str
 		stopCh:      make(chan bool, 1),
 		resolver:    &Resolver{},
 	}
-	err := s.initClient()
-	if err != nil {
-		panic(fmt.Errorf("[NewResolverServer]err:%v", err))
-	}
 	go s.Start()
 	return s
-}
-
-func (s *ResolverServer) initClient() error {
-	// TODO 一旦某个 client 发生异常可能导致瘫痪，所以要有足够的兜底方式，随时刷新 client
-	// 后面确认一下
-	mqClient, err := jsonrpc.Dial("tcp", s.conf.MqServerAddr)
-	if err != nil {
-		return err
-	}
-	s.mqClient = mqClient
-
-	collectorWriterClient, err := jsonrpc.Dial("tcp", s.conf.CollectorWriterServerAddr)
-	if err != nil {
-		return err
-	}
-	s.collectorWriterClient = collectorWriterClient
-
-	return nil
 }
 
 func (s *ResolverServer) Start() {
@@ -115,7 +93,7 @@ func (s *ResolverServer) Shutdown(lazyShutdown bool) {
 		// 直接调用 mq 的 clear 方法
 		clearMessageArgs := &protocol.MqClearMessageArgs{Tag: s.resolverTag}
 		var clearMessageReply protocol.MqClearMessageReply
-		err := s.mqClient.Call("MqServerAPI.ClearMessage", clearMessageArgs, &clearMessageReply)
+		err := s.CallMqServer("MqServerAPI.ClearMessage", clearMessageArgs, &clearMessageReply)
 		if err != nil {
 			log.Printf("[Shutdown]MqServerAPI.ClearMessage error:%v", err)
 		}
@@ -134,7 +112,7 @@ func (s *ResolverServer) consume() (protocol.MqMessage, bool, bool) {
 	}
 	filterMessageArgs := &protocol.MqFilterMessageArgs{Tag: s.resolverTag}
 	var filterMessageReply protocol.MqFilterMessageReply
-	err := s.mqClient.Call("MqServerAPI.FilterMessage", filterMessageArgs, &filterMessageReply)
+	err := s.CallMqServer("MqServerAPI.FilterMessage", filterMessageArgs, &filterMessageReply)
 	if err != nil {
 		log.Printf("[consume]MqServerAPI.FilterMessage error:%v", err)
 		return protocol.MqMessage{}, false, false
@@ -180,4 +158,32 @@ func (r *Resolver) pipeline(db *sql.DB) {
 	// 2 data package 间重排序（权衡：假定在 data package 规模为 N 时，snapshot 发生乱序的时间线不会超出两个 data package）
 	// 3 依次处理 snapshot
 	// 4 写入 collector
+}
+
+func (s *ResolverServer) CallMqServer(serviceMethod string, args any, reply any) error {
+	// 由于本身 rpc 连接是无状态的，因此这里不必加锁就行
+	return common.ExecuteFunctionByRetry(func() error {
+		if s.mqClient == nil {
+			mqClient, err := jsonrpc.Dial("tcp", s.conf.MqServerAddr)
+			if err != nil {
+				return err
+			}
+			s.mqClient = mqClient
+		}
+		return s.mqClient.Call(serviceMethod, args, reply)
+	})
+}
+
+func (s *ResolverServer) CallCollectorWriterServer(serviceMethod string, args any, reply any) error {
+	// 由于本身 rpc 连接是无状态的，因此这里不必加锁就行
+	return common.ExecuteFunctionByRetry(func() error {
+		if s.collectorWriterClient == nil {
+			collectorWriterClient, err := jsonrpc.Dial("tcp", s.conf.CollectorWriterServerAddr)
+			if err != nil {
+				return err
+			}
+			s.collectorWriterClient = collectorWriterClient
+		}
+		return s.collectorWriterClient.Call(serviceMethod, args, reply)
+	})
 }
