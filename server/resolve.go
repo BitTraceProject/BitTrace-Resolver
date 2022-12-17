@@ -163,27 +163,35 @@ func (r *Resolver) pipeline(db *sql.DB) {
 func (s *ResolverServer) CallMqServer(serviceMethod string, args any, reply any) error {
 	// 由于本身 rpc 连接是无状态的，因此这里不必加锁就行
 	return common.ExecuteFunctionByRetry(func() error {
+		var err error
 		if s.mqClient == nil {
-			mqClient, err := jsonrpc.Dial("tcp", s.conf.MqServerAddr)
+			s.mqClient, err = jsonrpc.Dial("tcp", s.conf.MqServerAddr)
 			if err != nil {
 				return err
 			}
-			s.mqClient = mqClient
 		}
-		return s.mqClient.Call(serviceMethod, args, reply)
+		err = s.mqClient.Call(serviceMethod, args, reply)
+		if err != nil {
+			s.mqClient = nil
+		}
+		return err
 	})
 }
 
 func (s *ResolverServer) CallCollectorWriterServer(serviceMethod string, args any, reply any) error {
 	// 由于本身 rpc 连接是无状态的，因此这里不必加锁就行
 	return common.ExecuteFunctionByRetry(func() error {
+		var err error
 		if s.collectorWriterClient == nil {
-			collectorWriterClient, err := jsonrpc.Dial("tcp", s.conf.CollectorWriterServerAddr)
+			s.collectorWriterClient, err = jsonrpc.Dial("tcp", s.conf.CollectorWriterServerAddr)
 			if err != nil {
 				return err
 			}
-			s.collectorWriterClient = collectorWriterClient
 		}
-		return s.collectorWriterClient.Call(serviceMethod, args, reply)
+		err = s.collectorWriterClient.Call(serviceMethod, args, reply)
+		if err != nil {
+			s.collectorWriterClient = nil
+		}
+		return err
 	})
 }
