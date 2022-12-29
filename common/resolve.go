@@ -109,11 +109,9 @@ func (h *DefaultResolverHandler) CallCollectorWriterServer(collectorWriterServer
 }
 
 func (h *DefaultResolverHandler) daemon() {
-	fmt.Printf("[daemon]")
 	for {
 		select {
 		case snapshotPair, ok := <-h.snapshotStream:
-			fmt.Printf("[daemon]pair:[%v]\n", snapshotPair)
 			if ok {
 				h.OnResolve(snapshotPair)
 			}
@@ -143,8 +141,6 @@ func (m *dataPackageMap) PutDataPackage(dp protocol.ReceiverDataPackage) ([]stru
 	for {
 		firstRSeq := m.firstLSeq + int64(len(m.dataMap[m.firstLSeq]))
 		if _, ok := m.dataMap[firstRSeq]; ok {
-			//// 存在则先尝试 reorganize
-			//m.reorganize(m.firstLSeq, firstRSeq)
 			newData := m.dataMap[m.firstLSeq]
 			// 设置新的 firstLSeq
 			delete(m.dataMap, m.firstLSeq)
@@ -183,58 +179,9 @@ func (m *dataPackageMap) sortSnapshotByTimestamp(snapshotData []structure.Snapsh
 	return snapshotData
 }
 
-//func (m *dataPackageMap) reorganize(lseq, rseq int64) {
-//	ldata, rdata := m.dataMap[lseq], m.dataMap[rseq]
-//	//var (
-//	//	ll, lr           = len(ldata), len(rdata)
-//	//	reorganizeLength = 0
-//	//	i, j             = ll, 0
-//	//)
-//	//for i > 0 {
-//	//	// 找到 ldata 中第一个比 rdata[0] 小的位置，说明该位置 i 以前的 data 是符合顺序的，i 及后面则需要交换
-//	//	if ldata[i-1].Timestamp <= rdata[0].Timestamp {
-//	//		break
-//	//	}
-//	//	i--
-//	//}
-//	//if ll-i > reorganizeLength {
-//	//	reorganizeLength = ll - i
-//	//}
-//	//for j < lr {
-//	//	// 找到 rdata 中第一个比 ldata[ll-1] 大的位置，说明该位置 j 及以后的 data 是符合顺序的，j 前面则需要交换
-//	//	if rdata[j].Timestamp > rdata[ll-1].Timestamp {
-//	//		break
-//	//	}
-//	//	j++
-//	//}
-//	//if j > reorganizeLength {
-//	//	reorganizeLength = j
-//	//}
-//	//
-//	//// reorganizeLength 记录需要交换的最大长度
-//	//if reorganizeLength > 0 {
-//	//	newData := make([]structure.Snapshot, 0, 2*reorganizeLength)
-//	//	newData = append(newData, ldata[ll-reorganizeLength:]...)
-//	//	newData = append(newData, rdata[:reorganizeLength]...)
-//	//	newData = m.sortSnapshotByTimestamp(newData)
-//	//
-//	//	newLdata := newData[:reorganizeLength]
-//	//	newRdata := newData[reorganizeLength:]
-//	//	processi, processj := i, 0
-//	//	for processi < ll {
-//	//		ldata[processi] = newLdata[processj]
-//	//		rdata[processj] = newRdata[processj]
-//	//		processi++
-//	//		processj++
-//	//	}
-//	//}
-//	m.dataMap[lseq] = ldata
-//	m.dataMap[rseq] = rdata
-//}
-
 func newSnapshotPairMap() *snapshotPairMap {
 	return &snapshotPairMap{
-		pairSkipList: skiplist.New(skiplist.Int64),
+		pairSkipList: skiplist.New(skiplist.String),
 		pairMap:      map[string]*snapshotPair{},
 	}
 }
@@ -242,7 +189,7 @@ func newSnapshotPairMap() *snapshotPairMap {
 func (m *snapshotPairMap) PutSnapshot(snapshotList ...structure.Snapshot) [][2]structure.Snapshot {
 	for _, snapshot := range snapshotList {
 		if _, ok := m.pairMap[snapshot.ID]; !ok {
-			m.pairSkipList.Set(snapshot.Timestamp, snapshot.ID)
+			m.pairSkipList.Set(snapshot.ID, snapshot.ID)
 			m.pairMap[snapshot.ID] = &snapshotPair{
 				snapshotID: snapshot.ID,
 				final:      false,
@@ -262,8 +209,6 @@ func (m *snapshotPairMap) PutSnapshot(snapshotList ...structure.Snapshot) [][2]s
 			break
 		}
 		id := m.pairSkipList.Front().Value.(string)
-		fmt.Printf("[PutSnapshot]id:%s\n", id)
-		fmt.Printf("[PutSnapshot]id:%s,%v\n", id, m.pairMap[id].final)
 		if m.pairMap[id].final {
 			snapshotPairList = append(snapshotPairList, [2]structure.Snapshot{m.pairMap[id].initSnapshot, m.pairMap[id].finalSnapshot})
 			m.RemoveSnapshotPair(id)
@@ -277,7 +222,7 @@ func (m *snapshotPairMap) PutSnapshot(snapshotList ...structure.Snapshot) [][2]s
 func (m *snapshotPairMap) RemoveSnapshotPair(id string) (*snapshotPair, bool) {
 	if pair, ok := m.pairMap[id]; ok {
 		delete(m.pairMap, id)
-		m.pairSkipList.Remove(pair.initSnapshot.Timestamp)
+		m.pairSkipList.Remove(pair.snapshotID)
 		return pair, ok
 	}
 	return nil, false
