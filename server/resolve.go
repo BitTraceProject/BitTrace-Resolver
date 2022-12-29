@@ -1,15 +1,14 @@
 package server
 
 import (
-	"database/sql"
 	"encoding/json"
 	"log"
 	"net/rpc"
 	"net/rpc/jsonrpc"
 	"time"
 
+	resolver_common "github.com/BitTraceProject/BitTrace-Resolver/common"
 	"github.com/BitTraceProject/BitTrace-Types/pkg/common"
-	"github.com/BitTraceProject/BitTrace-Types/pkg/config"
 	"github.com/BitTraceProject/BitTrace-Types/pkg/constants"
 	"github.com/BitTraceProject/BitTrace-Types/pkg/protocol"
 )
@@ -18,31 +17,26 @@ type (
 	ResolverServer struct {
 		resolverTag string // resolver tag
 		exporterTag string // 对应的 exporter tag，从 mq 消费消息
-		conf        *config.ResolverConfig
 
-		mqClient              *rpc.Client
-		collectorWriterClient *rpc.Client
+		mqServerAddr string
+		mqClient     *rpc.Client
 
 		hasShutdown  bool
 		lazyShutdown bool
 
 		stopCh chan bool
 
-		resolver *Resolver
-	}
-
-	// Resolver 具体地数据处理能力
-	Resolver struct {
+		resolverHandler resolver_common.ResolverHandler
 	}
 )
 
-func NewResolverServer(conf *config.ResolverConfig, resolverTag, exporterTag string) *ResolverServer {
+func NewResolverServer(mqServerAddr string, resolverTag, exporterTag string, resolverHandler resolver_common.ResolverHandler) *ResolverServer {
 	s := &ResolverServer{
-		resolverTag: resolverTag,
-		exporterTag: exporterTag,
-		conf:        conf,
-		stopCh:      make(chan bool, 1),
-		resolver:    &Resolver{},
+		resolverTag:     resolverTag,
+		exporterTag:     exporterTag,
+		mqServerAddr:    mqServerAddr,
+		stopCh:          make(chan bool, 1),
+		resolverHandler: resolverHandler,
 	}
 	go s.Start()
 	return s
@@ -130,34 +124,23 @@ func (s *ResolverServer) consume() (protocol.MqMessage, bool, bool) {
 	return msg, hasNext, true
 }
 
-// resolve TODO 处理消息，存入 collector
 func (s *ResolverServer) resolve(message protocol.MqMessage) {
 	if s.hasShutdown {
 		return
 	}
 	tag, data := message.Tag, message.Msg
+	if tag != s.resolverTag {
+		return
+	}
 	var dataPackage protocol.ReceiverDataPackage
 	err := json.Unmarshal(data, &dataPackage)
 	if err != nil {
 		log.Printf("[resolve]err:%v", err)
 	}
 
-	log.Printf("resolve:%s,tag:%s,message:%+v", s.resolverTag, tag, dataPackage)
+	//log.Printf("resolve:%s,tag:%s,message:%+v", s.resolverTag, tag, dataPackage)
 
-	// TODO 确定写入 collector 的方式
-	//s.resolver.pipeline(db)
-}
-
-// pipeline 按照规定流程，
-// 以 data package 为单位进行重排序，
-// 以 snapshot 为单位进行处理，
-// 处理结果写入 collector
-// TODO 流程图
-func (r *Resolver) pipeline(db *sql.DB) {
-	// 1 data package 内部重排序（基于 snapshot timestamp）
-	// 2 data package 间重排序（权衡：假定在 data package 规模为 N 时，snapshot 发生乱序的时间线不会超出两个 data package）
-	// 3 依次处理 snapshot
-	// 4 写入 collector
+	s.resolverHandler.OnReceive(dataPackage)
 }
 
 func (s *ResolverServer) CallMqServer(serviceMethod string, args any, reply any) error {
@@ -165,7 +148,7 @@ func (s *ResolverServer) CallMqServer(serviceMethod string, args any, reply any)
 	return common.ExecuteFunctionByRetry(func() error {
 		var err error
 		if s.mqClient == nil {
-			s.mqClient, err = jsonrpc.Dial("tcp", s.conf.MqServerAddr)
+			s.mqClient, err = jsonrpc.Dial("tcp", s.mqServerAddr)
 			if err != nil {
 				return err
 			}
@@ -173,24 +156,6 @@ func (s *ResolverServer) CallMqServer(serviceMethod string, args any, reply any)
 		err = s.mqClient.Call(serviceMethod, args, reply)
 		if err != nil {
 			s.mqClient = nil
-		}
-		return err
-	})
-}
-
-func (s *ResolverServer) CallCollectorWriterServer(serviceMethod string, args any, reply any) error {
-	// 由于本身 rpc 连接是无状态的，因此这里不必加锁就行
-	return common.ExecuteFunctionByRetry(func() error {
-		var err error
-		if s.collectorWriterClient == nil {
-			s.collectorWriterClient, err = jsonrpc.Dial("tcp", s.conf.CollectorWriterServerAddr)
-			if err != nil {
-				return err
-			}
-		}
-		err = s.collectorWriterClient.Call(serviceMethod, args, reply)
-		if err != nil {
-			s.collectorWriterClient = nil
 		}
 		return err
 	})

@@ -2,7 +2,10 @@ module github.com/BitTraceProject/BitTrace-Resolver
 
 go 1.18
 
-require github.com/BitTraceProject/BitTrace-Types v0.0.0-20221217121029-a62ae0e46a99
+require (
+	github.com/BitTraceProject/BitTrace-Types v0.0.0-20221229120610-d33ab7f581fe
+	github.com/huandu/skiplist v1.2.0
+)
 
 require (
 	github.com/fsnotify/fsnotify v1.5.4 // indirect

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/BitTraceProject/BitTrace-Resolver/common"
+	resolver_common "github.com/BitTraceProject/BitTrace-Resolver/common"
 	"github.com/BitTraceProject/BitTrace-Types/pkg/config"
 	"github.com/BitTraceProject/BitTrace-Types/pkg/protocol"
 )
@@ -81,7 +82,7 @@ func (api *ResolverMgrServerAPI) Start(args *protocol.ResolverStartArgs, reply *
 		api.Lock()
 		if _, ok := api.resolvers[exporterTag]; !ok {
 			resolverTag := common.GenResolverTag(exporterTag)
-			resolver = NewResolverServer(api.resolverConf, resolverTag, exporterTag)
+			resolver = NewResolverServer(api.resolverConf.MqServerAddr, resolverTag, exporterTag, resolver_common.NewDefaultResolverHandler(api.resolverConf.CollectorWriterServerAddr))
 			api.resolvers[exporterTag] = resolver
 		}
 		api.Unlock()
