@@ -17,8 +17,8 @@ func TestResolverHandler(t *testing.T) {
 			LeftSeq:  0,
 			RightSeq: 2,
 			DataPackage: [][]byte{
-				genSnapshotData("s1", structure.SnapshotInit, 1),
-				genSnapshotData("s2", structure.SnapshotInit, 2),
+				genSnapshotData("s1", structure.SnapshotTypeInit, 1),
+				genSnapshotData("s2", structure.SnapshotTypeInit, 2),
 			},
 			EOF: false,
 		},
@@ -27,8 +27,8 @@ func TestResolverHandler(t *testing.T) {
 			LeftSeq:  2,
 			RightSeq: 4,
 			DataPackage: [][]byte{
-				genSnapshotData("s2", structure.SnapshotFinal, 5),
-				genSnapshotData("s3", structure.SnapshotInit, 3),
+				genSnapshotData("s2", structure.SnapshotTypeFinal, 5),
+				genSnapshotData("s3", structure.SnapshotTypeInit, 3),
 			},
 			EOF: false,
 		},
@@ -37,8 +37,8 @@ func TestResolverHandler(t *testing.T) {
 			LeftSeq:  4,
 			RightSeq: 6,
 			DataPackage: [][]byte{
-				genSnapshotData("s1", structure.SnapshotFinal, 4),
-				genSnapshotData("s4", structure.SnapshotInit, 6),
+				genSnapshotData("s1", structure.SnapshotTypeFinal, 4),
+				genSnapshotData("s4", structure.SnapshotTypeInit, 6),
 			},
 			EOF: true,
 		},
@@ -47,8 +47,8 @@ func TestResolverHandler(t *testing.T) {
 			LeftSeq:  0,
 			RightSeq: 2,
 			DataPackage: [][]byte{
-				genSnapshotData("s5", structure.SnapshotInit, 8),
-				genSnapshotData("s4", structure.SnapshotFinal, 7),
+				genSnapshotData("s5", structure.SnapshotTypeInit, 8),
+				genSnapshotData("s4", structure.SnapshotTypeFinal, 7),
 			},
 			EOF: false,
 		},
@@ -57,8 +57,8 @@ func TestResolverHandler(t *testing.T) {
 			LeftSeq:  2,
 			RightSeq: 4,
 			DataPackage: [][]byte{
-				genSnapshotData("s3", structure.SnapshotFinal, 9),
-				genSnapshotData("s5", structure.SnapshotFinal, 12),
+				genSnapshotData("s3", structure.SnapshotTypeFinal, 9),
+				genSnapshotData("s5", structure.SnapshotTypeFinal, 12),
 			},
 			EOF: false,
 		},
@@ -67,8 +67,8 @@ func TestResolverHandler(t *testing.T) {
 			LeftSeq:  4,
 			RightSeq: 6,
 			DataPackage: [][]byte{
-				genSnapshotData("s6", structure.SnapshotInit, 10),
-				genSnapshotData("s6", structure.SnapshotFinal, 11),
+				genSnapshotData("s6", structure.SnapshotTypeInit, 10),
+				genSnapshotData("s6", structure.SnapshotTypeFinal, 11),
 			},
 			EOF: true,
 		},
@@ -88,7 +88,6 @@ func genSnapshotData(id string, t structure.SnapshotType, timestamp int64) []byt
 		TargetChainHeight: 0,
 		Type:              t,
 		Timestamp:         structure.Timestamp(timestamp),
-		Status:            structure.Status{},
 		RevisionList:      nil,
 	}
 	data, _ := json.Marshal(s)

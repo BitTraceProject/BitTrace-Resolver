@@ -19,11 +19,11 @@ import (
 // ResolverHandler 完成所有 snapshot 的重排序和处理工作，
 // resolver 保证处理是串行的，handler 无需考虑并发问题，
 // 以 data package 为单位进行重排序，
-// 以 snapshot 为单位进行处理，
+// 以 snapshot pair 为单位进行处理，
 // 处理结果写入 collector。
-// - dp 间，根据 day 和 seq 排序，btree（http 和 rpc 乱序）；
-// - dp 内，根据 timestamp 排序，sort（logger 本身乱序）；
-// - dp 间，根据 timestamp 排序，两两组装 dp（logger 本身乱序，且乱序之处恰好处于两个 dp 间）,（权衡：假定在 data package 规模为 N 时，snapshot 发生乱序的时间线不会超出两个 data package）；
+// - dp 间，根据 day 和 seq 排序（http 和 rpc 乱序，通过 map 维护滑动窗口解决）；
+// - dp 内，根据 timestamp 排序（logger 本身乱序，通过 sort 解决）；
+// - dp 间，根据 timestamp 排序，两两组装 dp（logger 本身乱序，且乱序之处恰好处于两个 dp 间，通过 skiplist 解决）;
 // - 流式读取 snapshot，组装成对；
 // - 处理每一对 snapshot，异步写入 collector；
 // - 实现下面的三个方法，然后在 resolver 处调用 OnReceive 方法即可；
@@ -39,20 +39,20 @@ type (
 
 		snapshotPairMap *snapshotPairMap
 
-		snapshotStream chan [2]structure.Snapshot
+		snapshotStream chan [2]*structure.Snapshot
 
 		collectorWriterServerAddr string
 		collectorWriterClient     *rpc.Client
 	}
 	dataPackageMap struct {
 		firstLSeq int64
-		dataMap   map[int64][]structure.Snapshot // next data lseq = lseq+len(data)
+		dataMap   map[int64][]*structure.Snapshot // next data lseq = lseq+len(data)
 		eof       bool
 	}
 	snapshotPair struct {
 		snapshotID    string
-		initSnapshot  structure.Snapshot
-		finalSnapshot structure.Snapshot
+		initSnapshot  *structure.Snapshot
+		finalSnapshot *structure.Snapshot
 		final         bool
 	}
 	snapshotPairMap struct {
@@ -65,7 +65,7 @@ func NewDefaultResolverHandler(collectorWriterServerAddr string) *DefaultResolve
 	h := &DefaultResolverHandler{
 		dataPackageMap:            newDataPackageMap(),
 		snapshotPairMap:           newSnapshotPairMap(),
-		snapshotStream:            make(chan [2]structure.Snapshot, constants.RESOLVER_SNAPSHOTPAIR_STREAM_SIZE),
+		snapshotStream:            make(chan [2]*structure.Snapshot, constants.RESOLVER_SNAPSHOTPAIR_STREAM_SIZE),
 		collectorWriterServerAddr: collectorWriterServerAddr,
 	}
 	go h.daemon() // 前台重排序，后台按序处理和写入 collector
@@ -86,7 +86,7 @@ func (h *DefaultResolverHandler) OnReceive(dp protocol.ReceiverDataPackage) {
 }
 
 // TODO OnResolve
-func (h *DefaultResolverHandler) OnResolve(snapshotPair [2]structure.Snapshot) {
+func (h *DefaultResolverHandler) OnResolve(snapshotPair [2]*structure.Snapshot) {
 	fmt.Printf("[OnResolve]pair:[%v]\n", snapshotPair)
 }
 
@@ -122,22 +122,22 @@ func (h *DefaultResolverHandler) daemon() {
 func newDataPackageMap() *dataPackageMap {
 	return &dataPackageMap{
 		firstLSeq: 0,
-		dataMap:   map[int64][]structure.Snapshot{},
+		dataMap:   map[int64][]*structure.Snapshot{},
 		eof:       false,
 	}
 }
 
 // PutDataPackage put data in this day and return the new data that sorted(between dp) and eof status
-func (m *dataPackageMap) PutDataPackage(dp protocol.ReceiverDataPackage) ([]structure.Snapshot, bool) {
+func (m *dataPackageMap) PutDataPackage(dp protocol.ReceiverDataPackage) ([]*structure.Snapshot, bool) {
 	if dp.EOF {
 		m.eof = true
 	}
 	// 1 内部排序后，直接放入 data map
-	snapshotData := m.sortRawSnapshotByTimestamp(dp.DataPackage)
-	m.dataMap[dp.LeftSeq] = snapshotData
+	snapshotList := m.sortRawSnapshotByTimestamp(dp.DataPackage)
+	m.dataMap[dp.LeftSeq] = snapshotList
 
 	// 2 循环判断 first 对应的 下一个 dp 是否存在，来判断是否返回 first dp data
-	var data = make([]structure.Snapshot, 0, len(m.dataMap[m.firstLSeq]))
+	var data = make([]*structure.Snapshot, 0, len(m.dataMap[m.firstLSeq]))
 	for {
 		firstRSeq := m.firstLSeq + int64(len(m.dataMap[m.firstLSeq]))
 		if _, ok := m.dataMap[firstRSeq]; ok {
@@ -158,25 +158,30 @@ func (m *dataPackageMap) PutDataPackage(dp protocol.ReceiverDataPackage) ([]stru
 	return data, false
 }
 
-func (m *dataPackageMap) sortRawSnapshotByTimestamp(data [][]byte) []structure.Snapshot {
-	snapshotData := make([]structure.Snapshot, len(data))
+func (m *dataPackageMap) sortRawSnapshotByTimestamp(data [][]byte) []*structure.Snapshot {
+	snapshotList := make([]*structure.Snapshot, len(data))
 	for i := range data {
+		snapshotBytes, err := Base64StdDecode(data[i])
+		if err != nil {
+			log.Printf("[Base64StdDecode]base64 decode err:%v", err)
+			continue
+		}
 		var snapshot structure.Snapshot
-		err := json.Unmarshal(data[i], &snapshot)
+		err = json.Unmarshal(snapshotBytes, &snapshot)
 		if err != nil {
 			log.Printf("[sortSnapshotByTimestamp]json err:%v", err)
 			continue
 		}
-		snapshotData[i] = snapshot
+		snapshotList[i] = &snapshot
 	}
-	return m.sortSnapshotByTimestamp(snapshotData)
+	return m.sortSnapshotByTimestamp(snapshotList)
 }
 
-func (m *dataPackageMap) sortSnapshotByTimestamp(snapshotData []structure.Snapshot) []structure.Snapshot {
-	sort.Slice(snapshotData, func(i, j int) bool {
-		return snapshotData[i].Timestamp < snapshotData[j].Timestamp
+func (m *dataPackageMap) sortSnapshotByTimestamp(snapshotList []*structure.Snapshot) []*structure.Snapshot {
+	sort.Slice(snapshotList, func(i, j int) bool {
+		return snapshotList[i].Timestamp < snapshotList[j].Timestamp
 	})
-	return snapshotData
+	return snapshotList
 }
 
 func newSnapshotPairMap() *snapshotPairMap {
@@ -186,7 +191,7 @@ func newSnapshotPairMap() *snapshotPairMap {
 	}
 }
 
-func (m *snapshotPairMap) PutSnapshot(snapshotList ...structure.Snapshot) [][2]structure.Snapshot {
+func (m *snapshotPairMap) PutSnapshot(snapshotList ...*structure.Snapshot) [][2]*structure.Snapshot {
 	for _, snapshot := range snapshotList {
 		if _, ok := m.pairMap[snapshot.ID]; !ok {
 			m.pairSkipList.Set(snapshot.ID, snapshot.ID)
@@ -195,7 +200,7 @@ func (m *snapshotPairMap) PutSnapshot(snapshotList ...structure.Snapshot) [][2]s
 				final:      false,
 			}
 		}
-		if snapshot.Type == structure.SnapshotInit {
+		if snapshot.Type == structure.SnapshotTypeInit {
 			m.pairMap[snapshot.ID].initSnapshot = snapshot
 		} else {
 			m.pairMap[snapshot.ID].finalSnapshot = snapshot
@@ -203,14 +208,14 @@ func (m *snapshotPairMap) PutSnapshot(snapshotList ...structure.Snapshot) [][2]s
 			m.pairMap[snapshot.ID].final = true
 		}
 	}
-	snapshotPairList := [][2]structure.Snapshot{}
+	snapshotPairList := [][2]*structure.Snapshot{}
 	for {
 		if m.pairSkipList.Front() == nil {
 			break
 		}
 		id := m.pairSkipList.Front().Value.(string)
 		if m.pairMap[id].final {
-			snapshotPairList = append(snapshotPairList, [2]structure.Snapshot{m.pairMap[id].initSnapshot, m.pairMap[id].finalSnapshot})
+			snapshotPairList = append(snapshotPairList, [2]*structure.Snapshot{m.pairMap[id].initSnapshot, m.pairMap[id].finalSnapshot})
 			m.RemoveSnapshotPair(id)
 		} else {
 			break

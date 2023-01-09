@@ -3,7 +3,7 @@ module github.com/BitTraceProject/BitTrace-Resolver
 go 1.18
 
 require (
-	github.com/BitTraceProject/BitTrace-Types v0.0.0-20221229134246-fea3e0d066f9
+	github.com/BitTraceProject/BitTrace-Types v0.0.0-20230109124149-45c76275af51
 	github.com/huandu/skiplist v1.2.0
 )
 
