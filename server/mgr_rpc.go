@@ -134,7 +134,7 @@ func (api *ResolverMgrServerAPI) Start(args *protocol.ResolverStartArgs, reply *
 	resolver, ok := api.resolvers[exporterTag]
 	api.RUnlock()
 	if !ok { // 不存在分配一个新的 resolver
-		mgrLogger.Info("[Start][%s]resolver do not exist, init", exporterTag)
+		mgrLogger.Info("[Start][%s]resolver do not exist, start", exporterTag)
 		api.Lock()
 		if _, ok := api.resolvers[exporterTag]; !ok {
 			resolverTag := common.GenResolverTag(exporterTag)

@@ -4,7 +4,6 @@ go 1.18
 
 require (
 	github.com/BitTraceProject/BitTrace-Types v0.1.0 // update
-	github.com/huandu/skiplist v1.2.0
 	gorm.io/gorm v1.24.5
 )
 

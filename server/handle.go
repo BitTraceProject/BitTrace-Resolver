@@ -18,7 +18,6 @@ import (
 	"github.com/BitTraceProject/BitTrace-Types/pkg/protocol"
 	"github.com/BitTraceProject/BitTrace-Types/pkg/structure"
 
-	"github.com/huandu/skiplist"
 	"gorm.io/gorm"
 )
 
@@ -75,15 +74,13 @@ type (
 		// pair: init+final
 		initSnapshot  *structure.Snapshot
 		finalSnapshot *structure.Snapshot
-		hasFinal      bool
 		// sync
 		syncSnapshot *structure.Snapshot
 	}
 	snapshotPairMap struct {
 		exporterTag string
 
-		pairSkipList *skiplist.SkipList // timestamp:id，通过 timestamp 维护 id 有序，支持循环读取 timestamp 最小的 id
-		pairMap      map[string]*snapshotPair
+		pairMap map[string]*snapshotPair
 
 		resolverHandlerLogger logger.Logger
 	}
@@ -118,19 +115,23 @@ func (h *DefaultResolverHandler) OnReceive(dp protocol.ReceiverDataPackage) {
 	othersSnapshotPairList := make([]*snapshotPair, 0)
 	for _, snapshot := range allSnapshotList {
 		h.resolverHandlerLogger.Info("[OnReceive]process snapshot:%+v", snapshot)
+		if snapshot.Type == structure.SnapshotTypeUnknown {
+			h.resolverHandlerLogger.Warn("[OnReceive]unknown type snapshot:%+v", snapshot)
+			continue
+		}
 		if snapshot.Type == structure.SnapshotTypeSync {
 			syncSnapshotPair := &snapshotPair{
 				snapshotID:    snapshot.ID,
 				initSnapshot:  nil,
 				finalSnapshot: nil,
-				hasFinal:      false,
 
 				syncSnapshot: snapshot,
 			}
 			syncSnapshotPairList = append(syncSnapshotPairList, syncSnapshotPair)
 		} else {
-			snapshotPairList := h.snapshotPairMap.PutSnapshot(snapshot)
-			othersSnapshotPairList = append(othersSnapshotPairList, snapshotPairList...)
+			if snapshotPairFinal := h.snapshotPairMap.PutSnapshotData(snapshot); snapshotPairFinal != nil {
+				othersSnapshotPairList = append(othersSnapshotPairList, snapshotPairFinal)
+			}
 
 			// metric
 			if snapshot.Type == structure.SnapshotTypeInit {
@@ -458,52 +459,27 @@ func (m *dataPackageMap) sortSnapshotByTimestamp(snapshotList []*structure.Snaps
 func newSnapshotPairMap(exporterTag string, resolverHandlerLogger logger.Logger) *snapshotPairMap {
 	return &snapshotPairMap{
 		exporterTag:           exporterTag,
-		pairSkipList:          skiplist.New(skiplist.String),
 		pairMap:               map[string]*snapshotPair{},
 		resolverHandlerLogger: resolverHandlerLogger,
 	}
 }
 
-func (m *snapshotPairMap) PutSnapshot(snapshot *structure.Snapshot) []*snapshotPair {
-	if snapshot.Type == structure.SnapshotTypeInit {
-		if _, ok := m.pairMap[snapshot.ID]; !ok {
-			m.pairSkipList.Set(snapshot.ID, snapshot.ID)
-			m.pairMap[snapshot.ID] = &snapshotPair{
-				snapshotID: snapshot.ID,
-				hasFinal:   false,
-			}
+func (m *snapshotPairMap) PutSnapshotData(snapshot *structure.Snapshot) *snapshotPair {
+	if _, ok := m.pairMap[snapshot.ID]; !ok {
+		m.pairMap[snapshot.ID] = &snapshotPair{
+			snapshotID: snapshot.ID,
 		}
+	}
+	if snapshot.Type == structure.SnapshotTypeInit {
 		m.pairMap[snapshot.ID].initSnapshot = snapshot
+		if m.pairMap[snapshot.ID].finalSnapshot != nil {
+			return m.pairMap[snapshot.ID]
+		}
 	} else if snapshot.Type == structure.SnapshotTypeFinal {
 		m.pairMap[snapshot.ID].finalSnapshot = snapshot
-		// 不可能出现 final 在 init 前的情况
-		m.pairMap[snapshot.ID].hasFinal = true
-	} else {
-		return nil
-	}
-	snapshotPairList := make([]*snapshotPair, 0)
-	for {
-		if m.pairSkipList.Front() == nil {
-			break
-		}
-		id := m.pairSkipList.Front().Value.(string)
-		m.resolverHandlerLogger.Info("[PutSnapshot]has front:%+v", m.pairMap[id])
-		if m.pairMap[id].hasFinal {
-			snapshotPairList = append(snapshotPairList, m.pairMap[id])
-			m.RemoveSnapshotPair(id)
-		} else {
-			break
+		if m.pairMap[snapshot.ID].initSnapshot != nil {
+			return m.pairMap[snapshot.ID]
 		}
 	}
-	m.resolverHandlerLogger.Info("[PutSnapshot]result:%d", len(snapshotPairList))
-	return snapshotPairList
-}
-
-func (m *snapshotPairMap) RemoveSnapshotPair(id string) (*snapshotPair, bool) {
-	if pair, ok := m.pairMap[id]; ok {
-		delete(m.pairMap, id)
-		m.pairSkipList.Remove(pair.snapshotID)
-		return pair, ok
-	}
-	return nil, false
+	return nil
 }

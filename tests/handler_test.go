@@ -19,31 +19,31 @@ func TestResolverHandler(t *testing.T) {
 	var testCases = []protocol.ReceiverDataPackage{
 		genDataPackage("2023-01-14", 5),
 		genDataPackage("2023-01-14", 15),
-		genDataPackage("2023-01-14", 3),
-		genDataPackage("2023-01-14", 2),
-		genDataPackage("2023-01-14", 6),
-		genDataPackage("2023-01-14", 500),
+		genDataPackage("2023-01-14", 30),
+		genDataPackage("2023-01-14", 20),
+		genDataPackage("2023-01-14", 60),
 	}
 
-	resolverHandler := server.NewDefaultResolverHandler("", "", config.DatabaseConfig{})
+	resolverHandler := server.NewDefaultResolverHandler("e", "a", config.DatabaseConfig{})
 	for _, dp := range testCases {
 		resolverHandler.OnReceive(dp)
 	}
-	time.Sleep(3 * time.Second)
+	time.Sleep(3 * time.Minute)
 }
 
 func genDataPackage(day string, n int64) protocol.ReceiverDataPackage {
+	l, r := dataLeftSeq, dataLeftSeq+n
 	return protocol.ReceiverDataPackage{
 		Day:         day,
-		LeftSeq:     dataLeftSeq,
-		RightSeq:    dataLeftSeq + n,
+		LeftSeq:     l,
+		RightSeq:    r,
 		DataPackage: genSnapshotData(n),
 		EOF:         false,
 	}
 }
 
 func genSnapshotData(n int64) [][]byte {
-	f, err := os.OpenFile("./resolver.txt", os.O_RDWR, os.ModePerm)
+	f, err := os.OpenFile("./test.txt", os.O_RDWR, os.ModePerm)
 	if err != nil {
 		panic(err)
 	}
