@@ -1,0 +1,33 @@
+version: '3'
+volumes:
+  resolver.bittrace.proj:
+networks:
+  resolver_network.bittrace.proj:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.30.0.0/24
+services:
+  resolver_mgr:
+    image: ${IMAGE:-bittrace/resolver:latest}
+    container_name: mgr.resolver.bittrace.proj
+    hostname: mgr.resolver.bittrace.proj
+    labels:
+      service: mgr.resolver.bittrace.proj
+    restart: on-failure
+    environment:
+      - "MODULE=mgr"
+    volumes:
+      - /root/.bittrace:/root/.bittrace # 这里是绝对目录映射
+    ports:
+      - '8083:8083'
+      - '9093:9093'
+    networks:
+      resolver_network.bittrace.proj:
+        ipv4_address: 172.30.0.10
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 100000
+        hard: 200000
