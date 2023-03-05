@@ -154,7 +154,6 @@ func (s *ResolverServer) consume() (protocol.MqMessage, bool, bool) {
 		return protocol.MqMessage{}, false, false
 	}
 	if !filterMessageReply.OK {
-		s.resolverLogger.Error("[consume]MqServerAPI.FilterMessage not ok")
 		return protocol.MqMessage{}, false, false
 	}
 	msg, hasNext := filterMessageReply.Message, filterMessageReply.HasNext
