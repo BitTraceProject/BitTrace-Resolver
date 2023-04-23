@@ -269,11 +269,17 @@ func (h *DefaultResolverHandler) OnResolve(snapshotPairList []*snapshotPair) {
 
 			eventOrphanList := make([]database.TableEventOrphan, 0, len(pair.finalSnapshot.EventOrphanList))
 			for _, e := range pair.finalSnapshot.EventOrphanList {
+				connectMainChain := 0
+				if e.ConnectMainChain {
+					connectMainChain = 1
+				}
 				eventOrphan := database.TableEventOrphan{
-					SnapshotID:           e.SnapshotID,
-					EventTypeOrphan:      int(e.Type),
-					OrphanBlockHash:      e.OrphanBlockHash,
-					EventOrphanTimestamp: e.Timestamp.String(),
+					SnapshotID:            e.SnapshotID,
+					EventTypeOrphan:       int(e.Type),
+					OrphanParentBlockHash: e.OrphanParentBlockHash,
+					OrphanBlockHash:       e.OrphanBlockHash,
+					ConnectMainChain:      connectMainChain,
+					EventOrphanTimestamp:  e.Timestamp.String(),
 				}
 				eventOrphanList = append(eventOrphanList, eventOrphan)
 			}
